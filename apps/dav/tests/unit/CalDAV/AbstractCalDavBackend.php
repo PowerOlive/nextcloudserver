@@ -24,16 +24,12 @@
  * along with this program. If not, see <http://www.gnu.org/licenses/>
  *
  */
-
 namespace OCA\DAV\Tests\unit\CalDAV;
 
 use OC\KnownUser\KnownUserService;
 use OCA\DAV\CalDAV\CalDavBackend;
 use OCA\DAV\CalDAV\Proxy\ProxyMapper;
 use OCA\DAV\Connector\Sabre\Principal;
-use OCA\DAV\Events\CalendarCreatedEvent;
-use OCA\DAV\Events\CalendarDeletedEvent;
-use OCA\DAV\Events\CalendarObjectCreatedEvent;
 use OCP\App\IAppManager;
 use OCP\EventDispatcher\IEventDispatcher;
 use OCP\IConfig;
@@ -66,9 +62,9 @@ abstract class AbstractCalDavBackend extends TestCase {
 	protected $userManager;
 	/** @var IGroupManager|\PHPUnit\Framework\MockObject\MockObject */
 	protected $groupManager;
-	/** @var EventDispatcherInterface|\PHPUnit\Framework\MockObject\MockObject */
-	protected $dispatcher;
 	/** @var IEventDispatcher|\PHPUnit\Framework\MockObject\MockObject */
+	protected $dispatcher;
+	/** @var EventDispatcherInterface|\PHPUnit\Framework\MockObject\MockObject */
 	protected $legacyDispatcher;
 
 	/** @var ISecureRandom */
@@ -113,7 +109,18 @@ abstract class AbstractCalDavBackend extends TestCase {
 		$db = \OC::$server->getDatabaseConnection();
 		$this->random = \OC::$server->getSecureRandom();
 		$this->logger = $this->createMock(ILogger::class);
-		$this->backend = new CalDavBackend($db, $this->principal, $this->userManager, $this->groupManager, $this->random, $this->logger, $this->dispatcher, $this->legacyDispatcher);
+		$this->config = $this->createMock(IConfig::class);
+		$this->backend = new CalDavBackend(
+			$db,
+			$this->principal,
+			$this->userManager,
+			$this->groupManager,
+			$this->random,
+			$this->logger,
+			$this->dispatcher,
+			$this->legacyDispatcher,
+			$this->config
+		);
 
 		$this->cleanUpBackend();
 	}
@@ -136,13 +143,12 @@ abstract class AbstractCalDavBackend extends TestCase {
 
 	private function cleanupForPrincipal($principal): void {
 		$calendars = $this->backend->getCalendarsForUser($principal);
-		$this->legacyDispatcher->expects(self::exactly(count($calendars)))
-			->method('dispatchTyped')
-			->with(self::callback(function ($event) {
-				return $event instanceof CalendarDeletedEvent;
-			}));
+		$this->dispatcher->expects(self::any())
+			->method('dispatchTyped');
+		$this->legacyDispatcher->expects(self::any())
+			->method('dispatch');
 		foreach ($calendars as $calendar) {
-			$this->backend->deleteCalendar($calendar['id']);
+			$this->backend->deleteCalendar($calendar['id'], true);
 		}
 		$subscriptions = $this->backend->getSubscriptionsForUser($principal);
 		foreach ($subscriptions as $subscription) {
@@ -151,11 +157,8 @@ abstract class AbstractCalDavBackend extends TestCase {
 	}
 
 	protected function createTestCalendar() {
-		$this->dispatcher->expects(self::once())
-			->method('dispatchTyped')
-			->with(self::callback(function ($event) {
-				return $event instanceof CalendarCreatedEvent;
-			}));
+		$this->dispatcher->expects(self::any())
+			->method('dispatchTyped');
 
 		$this->backend->createCalendar(self::UNIT_TEST_USER, 'Example', [
 			'{http://apple.com/ns/ical/}calendar-color' => '#1C4587FF'
@@ -210,11 +213,8 @@ END:VCALENDAR
 EOD;
 		$uri0 = $this->getUniqueID('event');
 
-		$this->dispatcher->expects(self::once())
-			->method('dispatchTyped')
-			->with(self::callback(function ($event) {
-				return $event instanceof CalendarObjectCreatedEvent;
-			}));
+		$this->dispatcher->expects(self::atLeastOnce())
+			->method('dispatchTyped');
 
 		$this->backend->createCalendarObject($calendarId, $uri0, $calData);
 
